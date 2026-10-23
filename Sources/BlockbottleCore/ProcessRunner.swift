@@ -59,6 +59,7 @@ public final class SystemProcessRunner: ProcessRunner, @unchecked Sendable {
         let process = Process()
         process.executableURL = invocation.executable
         process.arguments = invocation.arguments
+        if let cwd = invocation.workingDirectory { process.currentDirectoryURL = cwd }
         var env = ProcessInfo.processInfo.environment
         env.merge(invocation.environment) { _, new in new }
         process.environment = env

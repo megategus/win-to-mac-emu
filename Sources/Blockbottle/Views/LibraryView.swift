@@ -15,11 +15,19 @@ struct LibraryView: View {
                     ForEach(model.games) { game in
                         GameSlot(game: game, selected: model.selectedGame == game, running: model.isRunning(game))
                             .onTapGesture { model.selectedGame = game }
+                            .contextMenu {
+                                if game.isCustom {
+                                    Button("Remove from library") { model.removeCustomGame(game) }
+                                }
+                                Button("Show in Finder") {
+                                    NSWorkspace.shared.activateFileViewerSelecting([game.executable ?? game.installDir])
+                                }
+                            }
                     }
                 }
                 .padding(.horizontal, 24)
                 if model.games.isEmpty {
-                    ShadowText("No games yet — open Steam, sign in and install some!", size: 14)
+                    ShadowText("No games yet — install some in Steam, or use Add game… for any .exe", size: 14)
                         .padding(.top, 24)
                 }
             }
@@ -44,8 +52,14 @@ struct LibraryView: View {
                 .frame(width: 200)
             }
             Spacer()
+            Button("Add game…") { model.addCustomGame() }
+                .buttonStyle(.block(.stone, minWidth: 120, fontSize: 13))
+            Button("Run installer…") { model.runInstaller() }
+                .buttonStyle(.block(.stone, minWidth: 150, fontSize: 13))
+            Button("Steam report") { model.makeSteamReport() }
+                .buttonStyle(.block(.stone, minWidth: 140, fontSize: 13))
             Button("Refresh") { model.refreshLibrary() }
-                .buttonStyle(.block(.stone, minWidth: 110, fontSize: 13))
+                .buttonStyle(.block(.stone, minWidth: 100, fontSize: 13))
             Button(model.running["steam"] != nil ? "Steam running" : "Open Steam") { model.openSteam() }
                 .buttonStyle(.block(.green, minWidth: 160, fontSize: 13))
                 .disabled(model.running["steam"] != nil)
@@ -86,6 +100,7 @@ struct GameSlot: View {
                     Text(game.name).font(.pixel(12)).foregroundStyle(.white).lineLimit(1)
                     Spacer()
                     if running { Text("▶").font(.pixel(12)).foregroundStyle(Palette.grassLight) }
+                    if game.isCustom { Text("EXE").font(.pixel(10)).foregroundStyle(Palette.stoneLight) }
                     if AntiCheatList.isBlocked(game.appID) { Text("⚠").font(.pixel(12)).foregroundStyle(Palette.splashYellow) }
                 }
                 .padding(.horizontal, 8)

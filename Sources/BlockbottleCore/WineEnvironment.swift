@@ -4,11 +4,14 @@ public struct WineInvocation: Equatable, Sendable {
     public var executable: URL
     public var arguments: [String]
     public var environment: [String: String]
+    public var workingDirectory: URL?
 
-    public init(executable: URL, arguments: [String], environment: [String: String] = [:]) {
+    public init(executable: URL, arguments: [String], environment: [String: String] = [:],
+                workingDirectory: URL? = nil) {
         self.executable = executable
         self.arguments = arguments
         self.environment = environment
+        self.workingDirectory = workingDirectory
     }
 }
 
@@ -55,16 +58,18 @@ public struct WineEnvironment: Sendable {
         installedBackends().contains(wanted) ? (wanted, false) : (.wined3d, wanted != .wined3d)
     }
 
-    public func baseEnvironment(prefix: URL) -> [String: String] {
+    /// `verbose` keeps Wine's error channel so logs are useful for diagnosis;
+    /// otherwise everything is silenced for speed.
+    public func baseEnvironment(prefix: URL, verbose: Bool = false) -> [String: String] {
         [
             "WINEPREFIX": prefix.path,
-            "WINEDEBUG": "-all",
+            "WINEDEBUG": verbose ? "fixme-all" : "-all",
         ]
     }
 
-    public func invocation(prefix: URL, profile: GameProfile, program: [String]) -> WineInvocation {
+    public func invocation(prefix: URL, profile: GameProfile, program: [String], verbose: Bool = false) -> WineInvocation {
         let backend = resolve(profile.backend).backend
-        var env = baseEnvironment(prefix: prefix)
+        var env = baseEnvironment(prefix: prefix, verbose: verbose)
         if profile.msync {
             env["WINEMSYNC"] = "1"
             env["WINEESYNC"] = "1"
@@ -83,8 +88,9 @@ public struct WineEnvironment: Sendable {
     }
 
     /// Plain wine call with no game profile (wineboot, winecfg, reg, installers).
-    public func tool(prefix: URL, _ arguments: [String]) -> WineInvocation {
-        WineInvocation(executable: wineBinary, arguments: arguments, environment: baseEnvironment(prefix: prefix))
+    public func tool(prefix: URL, _ arguments: [String], verbose: Bool = false, workingDirectory: URL? = nil) -> WineInvocation {
+        WineInvocation(executable: wineBinary, arguments: arguments,
+                       environment: baseEnvironment(prefix: prefix, verbose: verbose), workingDirectory: workingDirectory)
     }
 
     public func retinaInvocation(prefix: URL, enabled: Bool) -> WineInvocation {

@@ -4,16 +4,21 @@ public struct SteamGame: Identifiable, Hashable, Codable, Sendable {
     public let appID: String
     public let name: String
     public let installDir: URL
+    /// Set for games added by hand (any .exe anywhere); nil for Steam games.
+    public let executable: URL?
     public var id: String { appID }
 
-    public init(appID: String, name: String, installDir: URL) {
+    public init(appID: String, name: String, installDir: URL, executable: URL? = nil) {
         self.appID = appID
         self.name = name
         self.installDir = installDir
+        self.executable = executable
     }
 
-    public var headerImageURL: URL {
-        URL(string: "https://cdn.cloudflare.steamstatic.com/steam/apps/\(appID)/header.jpg")!
+    public var isCustom: Bool { executable != nil }
+
+    public var headerImageURL: URL? {
+        isCustom ? nil : URL(string: "https://cdn.cloudflare.steamstatic.com/steam/apps/\(appID)/header.jpg")
     }
 }
 

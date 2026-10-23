@@ -2,6 +2,7 @@ import AppKit
 import BlockbottleCore
 import Observation
 import SwiftUI
+import UniformTypeIdentifiers
 
 struct SetupStep: Identifiable, Equatable {
     enum State: Equatable { case pending, running(Double), done, failed(String), skipped(String) }
@@ -150,12 +151,73 @@ final class AppModel {
     }
 
     func refreshLibrary() {
-        guard let bottle = selectedBottle else { games = []; return }
+        let custom = paths.map { CustomGameStore(paths: $0).list() } ?? []
+        guard let bottle = selectedBottle else { games = custom; return }
         let prefix = bottle.prefix
         Task.detached {
             let found = SteamLibraryScanner().scan(prefix: prefix)
-            await MainActor.run { self.games = found }
+            await MainActor.run { self.games = found + custom }
         }
+    }
+
+    /// Adds any Windows .exe (anywhere, e.g. on the external drive) to the library.
+    func addCustomGame() {
+        guard let paths else { return }
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [UTType(filenameExtension: "exe") ?? .data]
+        panel.allowsOtherFileTypes = false
+        panel.message = "Choose the game's .exe (not the installer)."
+        panel.prompt = "Add to library"
+        guard panel.runModal() == .OK, let exe = panel.url else { return }
+        let name = exe.deletingLastPathComponent().lastPathComponent
+        do {
+            try CustomGameStore(paths: paths).add(executable: exe, name: name.isEmpty ? exe.lastPathComponent : name)
+            flash("Added \(name)")
+        } catch {
+            flash("Couldn't add: \(describe(error))")
+        }
+        refreshLibrary()
+    }
+
+    func removeCustomGame(_ game: SteamGame) {
+        guard let paths, game.isCustom else { return }
+        try? CustomGameStore(paths: paths).remove(appID: game.appID)
+        refreshLibrary()
+    }
+
+    /// Runs a Windows setup.exe inside the selected bottle.
+    func runInstaller() {
+        guard let runner = gameRunner, let bottle = selectedBottle else { return }
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = ["exe", "msi"].compactMap { UTType(filenameExtension: $0) }
+        panel.message = "Choose a Windows installer (setup.exe / .msi). Install to C:\\Games or any drive letter."
+        panel.prompt = "Run installer"
+        guard panel.runModal() == .OK, let installer = panel.url else { return }
+        // msiexec needs a Windows path; Wine maps Z: to the Mac's root folder.
+        let windowsPath = "Z:" + installer.path.replacingOccurrences(of: "/", with: "\\")
+        let args = installer.pathExtension.lowercased() == "msi" ? ["msiexec", "/i", windowsPath] : [installer.path]
+        do {
+            let handle = try runner.runTool(args, bottle: bottle, workingDirectory: installer.deletingLastPathComponent())
+            flash("Installer started — when it finishes, use Add game to pick the installed .exe")
+            watch(handle, key: "installer", title: installer.lastPathComponent)
+        } catch {
+            flash("Couldn't start installer: \(describe(error))")
+        }
+    }
+
+    /// Writes a Steam diagnostics report, copies it, and shows it in Finder.
+    func makeSteamReport() {
+        guard let paths, let bottle = selectedBottle else { return }
+        let text = SteamDiagnostics(paths: paths).report(bottle: bottle)
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.dateFormat = "yyyyMMdd-HHmmss"
+        let url = paths.logs.appendingPathComponent("steam-report-\(f.string(from: Date())).txt")
+        try? text.write(to: url, atomically: true, encoding: .utf8)
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(text, forType: .string)
+        NSWorkspace.shared.activateFileViewerSelecting([url])
+        flash("Steam report copied — paste it to Claude")
     }
 
     func createBottle(named name: String) async {
@@ -340,6 +402,7 @@ final class AppModel {
             let handle = try runner.launchSteam(bottle: bottle)
             running["steam"] = handle
             watch(handle, key: "steam", title: "Steam")
+            flash("Starting Steam — the first start downloads ~300 MB, give it a few minutes")
         } catch {
             flash("Couldn't start Steam: \(describe(error))")
         }
@@ -366,6 +429,14 @@ final class AppModel {
         let started = Date()
         Task {
             let code = await handle.process.waitForExit()
+            if key == "steam" {
+                // The bootstrapper restarts itself while updating: keep Steam
+                // marked as running until no steam.exe is left.
+                let probe = SteamProcessProbe(runner: self.runner)
+                while await probe.isRunning() {
+                    try? await Task.sleep(nanoseconds: 3_000_000_000)
+                }
+            }
             self.running[key] = nil
             if key == "steam" { self.refreshLibrary() }
             if code != 0, Date().timeIntervalSince(started) < 10 {

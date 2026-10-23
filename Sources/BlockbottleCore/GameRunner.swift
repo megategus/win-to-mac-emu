@@ -38,8 +38,16 @@ public struct GameRunner: Sendable {
         _ = try? await runner.run(env.retinaInvocation(prefix: bottle.prefix, enabled: profile.retinaMode), logTo: log)
         var effective = profile
         effective.backend = resolved.backend
-        let program = [Self.steamExe, "-applaunch", game.appID] + profile.argumentList
-        let process = try runner.start(env.invocation(prefix: bottle.prefix, profile: effective, program: program), logTo: log)
+        var invocation: WineInvocation
+        if let exe = game.executable {
+            invocation = env.invocation(prefix: bottle.prefix, profile: effective, program: [exe.path] + profile.argumentList)
+            // Many games load data relative to their own folder.
+            invocation.workingDirectory = exe.deletingLastPathComponent()
+        } else {
+            let program = [Self.steamExe, "-applaunch", game.appID] + profile.argumentList
+            invocation = env.invocation(prefix: bottle.prefix, profile: effective, program: program)
+        }
+        let process = try runner.start(invocation, logTo: log)
         return LaunchHandle(process: process, logURL: log, backend: resolved.backend, fellBack: resolved.fellBack)
     }
 
@@ -47,13 +55,16 @@ public struct GameRunner: Sendable {
         let log = logURL(bottle: bottle, label: "steam")
         var profile = GameProfile()
         profile.backend = env.resolve(.d3dmetal).backend
-        let process = try runner.start(env.invocation(prefix: bottle.prefix, profile: profile, program: [Self.steamExe]), logTo: log)
+        let process = try runner.start(
+            env.invocation(prefix: bottle.prefix, profile: profile, program: [Self.steamExe], verbose: true), logTo: log)
         return LaunchHandle(process: process, logURL: log, backend: profile.backend, fellBack: false)
     }
 
-    public func runTool(_ args: [String], bottle: Bottle) throws -> LaunchHandle {
-        let log = logURL(bottle: bottle, label: args.first ?? "tool")
-        let process = try runner.start(env.tool(prefix: bottle.prefix, args), logTo: log)
+    public func runTool(_ args: [String], bottle: Bottle, workingDirectory: URL? = nil) throws -> LaunchHandle {
+        let label = URL(fileURLWithPath: args.first ?? "tool").deletingPathExtension().lastPathComponent
+        let log = logURL(bottle: bottle, label: label)
+        let process = try runner.start(
+            env.tool(prefix: bottle.prefix, args, verbose: true, workingDirectory: workingDirectory), logTo: log)
         return LaunchHandle(process: process, logURL: log, backend: .wined3d, fellBack: false)
     }
 

@@ -28,7 +28,8 @@ public struct WineEnvironment: Sendable {
             "bin/wine64",
             "bin/wine",
         ].map { wineRoot.appendingPathComponent($0) }
-        return candidates.first { FileManager.default.isExecutableFile(atPath: $0.path) } ?? candidates[1]
+        if let hit = candidates.first(where: { FileManager.default.isExecutableFile(atPath: $0.path) }) { return hit }
+        return EngineLayout.find("bin/wine64", under: wineRoot) ?? EngineLayout.find("bin/wine", under: wineRoot) ?? candidates[1]
     }
 
     public var wineserverBinary: URL {
@@ -72,15 +73,7 @@ public struct WineEnvironment: Sendable {
         switch backend {
         case .dxvk:
             env["DXVK_ASYNC"] = "1"
-        case .d3dmetal:
-            let gptk = paths.engines.appendingPathComponent("D3DMetal", isDirectory: true)
-            env["WINEDLLPATH"] = gptk.appendingPathComponent("lib/wine").path
-            env["DYLD_FALLBACK_LIBRARY_PATH"] = [
-                gptk.appendingPathComponent("lib/external").path,
-                gptk.appendingPathComponent("lib").path,
-                "/usr/lib",
-            ].joined(separator: ":")
-        case .dxmt, .wined3d:
+        case .d3dmetal, .dxmt, .wined3d:
             break
         }
         return WineInvocation(executable: wineBinary, arguments: program, environment: env)

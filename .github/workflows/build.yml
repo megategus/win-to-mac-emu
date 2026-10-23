@@ -19,6 +19,6 @@ jobs:
         run: sudo xcode-select -s "$(ls -d /Applications/Xcode_16*.app | sort -V | tail -1)" || true
       - run: swift --version
       - name: Test core
-        run: swift test 2>&1 | tee test.log
+        run: swift test
       - name: Build app
         run: swift build -c release --arch arm64

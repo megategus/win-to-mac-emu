@@ -24,7 +24,7 @@ public struct StorageValidator: Sendable {
 
     public var fsTypeProvider: @Sendable (URL) -> String?
 
-    public init(fsTypeProvider: @escaping @Sendable (URL) -> String? = StorageValidator.filesystemType(of:)) {
+    public init(fsTypeProvider: @escaping @Sendable (URL) -> String? = { StorageValidator.filesystemType(of: $0) }) {
         self.fsTypeProvider = fsTypeProvider
     }
 

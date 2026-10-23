@@ -26,6 +26,14 @@ Status: Approved in conversation; awaiting written-spec review
 
 **Assumptions**
 - Target macOS 14 (Sonoma) or later. Rosetta 2 required.
+- **Storage location is user-chosen** (added after approval): the user wants
+  everything on an external drive named "Untitled". First run asks for a
+  data root (default `~/Library/Application Support/Blockbottle`, suggested
+  `/Volumes/Untitled/Blockbottle` when that volume is mounted). The choice is
+  stored in `UserDefaults` key `dataRoot`. The chosen volume must be APFS or
+  HFS+ (Wine prefixes need symlinks + POSIX permissions); exFAT/FAT/NTFS are
+  rejected with an explanation. If the drive is unplugged at launch, the app
+  shows "World not found — plug in Untitled" instead of creating a new root.
 - "Steam games" means games installed by the **Windows** Steam client running
   inside a bottle.
 - Games with kernel anti-cheat (EAC/BattlEye/Vanguard without Wine support)
@@ -70,8 +78,9 @@ checked-in `Info.plist`. Architecture: `arm64` only (covers M1–M3+).
 
 | Unit | Purpose | Depends on |
 |---|---|---|
-| `AppPaths` | Resolves `~/Library/Application Support/Blockbottle/{Engines,Bottles,Logs}`; injectable root for tests | Foundation |
-| `EngineManifest` | Declares downloadable components (Wine, DXMT, DXVK+MoltenVK, D3DMetal) with URL, SHA-256, archive type, install subpath | — |
+| `AppPaths` | Resolves `<dataRoot>/{Engines,Bottles,Logs,Profiles}` from a user-chosen root; injectable root for tests | Foundation |
+| `StorageValidator` | Checks a candidate root: exists/creatable, writable, filesystem type is `apfs` or `hfs` (via `statfs` `f_fstypename`) | Foundation |
+| `EngineManifest` | Declares downloadable components (Wine, DXMT, DXVK+MoltenVK, D3DMetal) as GitHub repo + asset-name regex + install subdir; resolved at runtime via the GitHub Releases API (`/releases/latest`). SHA-256 taken from the asset's `digest` field when GitHub provides it | — |
 | `EngineManager` | Downloads (resumable via `URLSession`), verifies SHA-256, extracts (`/usr/bin/tar`/`ditto`), reports progress, reports installed state | `AppPaths`, `EngineManifest`, `ProcessRunner` |
 | `Bottle` / `BottleStore` | Bottle model (id, name, Windows version, created date, default backend) persisted as `bottle.json` inside each prefix dir; CRUD | `AppPaths` |
 | `WineEnvironment` | Builds the environment + argv for a wine invocation: `WINEPREFIX`, `WINEDEBUG`, `WINEMSYNC`/`WINEESYNC`, `WINEDLLOVERRIDES`, `MTL_HUD_ENABLED`, retina flag, backend vars | `Bottle`, `GameProfile`, `GraphicsBackend` |
@@ -168,8 +177,11 @@ Library refresh: on appear and on Steam process exit →
 
 ## 8. Known risks
 
-- Third-party engine URLs/versions change → pinned in `EngineManifest`,
-  updated by app release.
+- Third-party engine asset names change → regexes in `EngineManifest`,
+  updated by app release. Asset names could not be verified from the build
+  environment (GitHub web blocked), so first on-device run validates them.
+- No Swift toolchain in the authoring environment → CI (`macos-14`) is the
+  compiler and test runner.
 - D3DMetal license ambiguity → we never host it; user downloads from a
   third party at runtime.
 - Unverifiable here: actual Wine/Metal behavior; first real validation is on

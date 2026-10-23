@@ -51,9 +51,12 @@ scripts/make-dmg.sh      # build/Blockbottle.dmg
 - Engine download names are matched by pattern against upstream GitHub releases
   (Gcenx, 3Shain); if upstream renames assets, setup reports "no download found".
   Run the `probe-engines` workflow to see current names and archive layouts.
-- Wine comes from Gcenx's Game Porting Toolkit build (CrossOver-based Wine with
-  D3DMetal built in), falling back to plain wine-staging. DXMT/DXVK are swapped into
-  that Wine at launch, so only one backend is active at a time.
+- Each bottle has its own engine:
+  - **Wine Staging** (current upstream Wine, Gcenx build) for Steam bottles. DXMT and
+    DXVK are swapped into it at launch.
+  - **Game Porting Toolkit** (Gcenx build: Wine 7.7 + D3DMetal) for bottles of games
+    added with *Add game…*. It cannot run Steam: today's 64-bit Steam client crashes on
+    Wine 7.7 at start-up (reproduced in the `steam-repro` workflow).
 - D3DMetal comes from Apple's Game Porting Toolkit, downloaded at runtime from
   Gcenx's third-party build; it is never shipped in this repo or DMG.
 

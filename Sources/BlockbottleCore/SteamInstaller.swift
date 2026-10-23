@@ -13,13 +13,25 @@ public struct SteamInstaller: Sendable {
     let paths: AppPaths
     let runner: ProcessRunner
     let http: HTTPClient
-    let env: WineEnvironment
 
     public init(paths: AppPaths, runner: ProcessRunner, http: HTTPClient) {
         self.paths = paths
         self.runner = runner
         self.http = http
-        self.env = WineEnvironment(paths: paths)
+    }
+
+    private func log(_ bottle: Bottle) -> URL {
+        paths.logs.appendingPathComponent(bottle.id.uuidString, isDirectory: true).appendingPathComponent("steam-install.log")
+    }
+
+    /// Creates the Wine prefix (any engine) and sets the Windows version.
+    public func initialize(bottle: Bottle) async throws {
+        let env = WineEnvironment(paths: paths, engine: bottle.engine)
+        let boot = try await runner.run(env.tool(prefix: bottle.prefix, ["wineboot", "--init"], verbose: true), logTo: log(bottle))
+        guard boot == 0 else { throw SteamInstallError.winebootFailed(boot) }
+        _ = try? await runner.run(env.tool(prefix: bottle.prefix,
+            ["reg", "add", "HKCU\\Software\\Wine", "/v", "Version", "/t", "REG_SZ", "/d", bottle.windowsVersion, "/f"]),
+            logTo: log(bottle))
     }
 
     public func steamExe(in bottle: Bottle) -> URL {
@@ -31,14 +43,11 @@ public struct SteamInstaller: Sendable {
     }
 
     public func install(bottle: Bottle, progress: @escaping @Sendable (String) -> Void) async throws {
-        let log = paths.logs.appendingPathComponent(bottle.id.uuidString, isDirectory: true)
-            .appendingPathComponent("steam-install.log")
+        let env = WineEnvironment(paths: paths, engine: bottle.engine)
+        let logURL = log(bottle)
 
         progress("Generating world…")
-        let boot = try await runner.run(env.tool(prefix: bottle.prefix, ["wineboot", "--init"]), logTo: log)
-        guard boot == 0 else { throw SteamInstallError.winebootFailed(boot) }
-        _ = try? await runner.run(env.tool(prefix: bottle.prefix,
-            ["reg", "add", "HKCU\\Software\\Wine", "/v", "Version", "/t", "REG_SZ", "/d", bottle.windowsVersion, "/f"]), logTo: log)
+        try await initialize(bottle: bottle)
 
         progress("Downloading Steam…")
         let downloaded = try await http.download(from: Self.setupURL) { _ in }
@@ -48,7 +57,7 @@ public struct SteamInstaller: Sendable {
         defer { try? FileManager.default.removeItem(at: setup) }
 
         progress("Installing Steam…")
-        let code = try await runner.run(env.tool(prefix: bottle.prefix, [setup.path, "/S"]), logTo: log)
+        let code = try await runner.run(env.tool(prefix: bottle.prefix, [setup.path, "/S"], verbose: true), logTo: logURL)
         guard code == 0 else { throw SteamInstallError.setupFailed(code) }
         guard isInstalled(bottle: bottle) else { throw SteamInstallError.steamMissingAfterInstall }
     }

@@ -66,7 +66,15 @@ final class AppModel {
     var steamInstaller: SteamInstaller? { paths.map { SteamInstaller(paths: $0, runner: runner, http: http) } }
     var gameRunner: GameRunner? { paths.map { GameRunner(paths: $0, runner: runner) } }
     var profileStore: ProfileStore? { paths.map { ProfileStore(paths: $0) } }
-    var wineEnvironment: WineEnvironment? { paths.map { WineEnvironment(paths: $0) } }
+    var wineEnvironment: WineEnvironment? {
+        paths.map { WineEnvironment(paths: $0, engine: selectedBottle?.engine ?? .staging) }
+    }
+
+    /// The bottle Steam lives in (Steam only runs on Wine Staging).
+    var steamBottle: Bottle? {
+        let ok = bottles.compactMap(\.bottle).filter { $0.engine.runsSteam }
+        return ok.first { $0.id == selectedBottleID } ?? ok.first
+    }
 
     var selectedBottle: Bottle? {
         let ok = bottles.compactMap(\.bottle)
@@ -109,6 +117,7 @@ final class AppModel {
         let p = AppPaths(root: url)
         do {
             try p.ensureDirectories()
+            EngineManifest.migrate(paths: p)
         } catch {
             storageError = "Couldn't create folders: \(error.localizedDescription)"
             route = .storage
@@ -137,8 +146,7 @@ final class AppModel {
 
     var needsSetup: Bool {
         guard let engines = engineManager, let steam = steamInstaller else { return true }
-        let wine = EngineManifest.wine
-        guard engines.isInstalled(wine), let bottle = selectedBottle else { return true }
+        guard engines.isInstalled(EngineManifest.wine), let bottle = steamBottle else { return true }
         return !steam.isInstalled(bottle: bottle)
     }
 
@@ -151,8 +159,8 @@ final class AppModel {
     }
 
     func refreshLibrary() {
-        let custom = paths.map { CustomGameStore(paths: $0).list() } ?? []
-        guard let bottle = selectedBottle else { games = custom; return }
+        let custom = paths.map { CustomGameStore(paths: $0).list(bottleID: selectedBottle?.id) } ?? []
+        guard let bottle = selectedBottle, bottle.engine.runsSteam else { games = custom; return }
         let prefix = bottle.prefix
         Task.detached {
             let found = SteamLibraryScanner().scan(prefix: prefix)
@@ -171,7 +179,8 @@ final class AppModel {
         guard panel.runModal() == .OK, let exe = panel.url else { return }
         let name = exe.deletingLastPathComponent().lastPathComponent
         do {
-            try CustomGameStore(paths: paths).add(executable: exe, name: name.isEmpty ? exe.lastPathComponent : name)
+            try CustomGameStore(paths: paths).add(executable: exe, name: name.isEmpty ? exe.lastPathComponent : name,
+                                                  bottleID: selectedBottle?.id)
             flash("Added \(name)")
         } catch {
             flash("Couldn't add: \(describe(error))")
@@ -207,7 +216,7 @@ final class AppModel {
 
     /// Writes a Steam diagnostics report, copies it, and shows it in Finder.
     func makeSteamReport() {
-        guard let paths, let bottle = selectedBottle else { return }
+        guard let paths, let bottle = selectedBottle?.engine.runsSteam == true ? selectedBottle : steamBottle else { return }
         let text = SteamDiagnostics(paths: paths).report(bottle: bottle)
         let f = DateFormatter()
         f.locale = Locale(identifier: "en_US_POSIX")
@@ -220,14 +229,23 @@ final class AppModel {
         flash("Steam report copied — paste it to Claude")
     }
 
-    func createBottle(named name: String) async {
-        guard let paths, let steam = steamInstaller else { return }
+    func createBottle(named name: String, engine: WineEngine) async {
+        guard let paths, let steam = steamInstaller, let engines = engineManager else { return }
         do {
-            let bottle = try BottleStore(paths: paths).create(name: name.isEmpty ? "New World" : name)
+            if !engines.isInstalled(engine.component) {
+                flash("Mining \(engine.component.displayName)…")
+                try await engines.install(engine.component) { _ in }
+            }
+            let bottle = try BottleStore(paths: paths).create(name: name.isEmpty ? "New World" : name, engine: engine)
             reloadBottles()
             selectedBottleID = bottle.id
-            flash("Installing Steam into \(bottle.name)…")
-            try await steam.install(bottle: bottle) { _ in }
+            if engine.runsSteam {
+                flash("Installing Steam into \(bottle.name)…")
+                try await steam.install(bottle: bottle) { _ in }
+            } else {
+                flash("Generating \(bottle.name)…")
+                try await steam.initialize(bottle: bottle)
+            }
             flash("\(bottle.name) is ready!")
         } catch {
             flash("Bottle setup failed: \(error.localizedDescription)")
@@ -307,7 +325,7 @@ final class AppModel {
                 }
                 update(component.id, .done)
             } catch {
-                if component.id == "wine" {
+                if EngineManifest.required.contains(component.id) {
                     update(component.id, .failed(describe(error)))
                     return
                 }
@@ -317,10 +335,10 @@ final class AppModel {
         }
 
         update("bottle", .running(0.5))
-        var bottle = selectedBottle
+        var bottle = steamBottle
         if bottle == nil {
             do {
-                bottle = try BottleStore(paths: paths).create(name: "Steam")
+                bottle = try BottleStore(paths: paths).create(name: "Steam", engine: .staging)
                 reloadBottles()
             } catch {
                 update("bottle", .failed(describe(error)))
@@ -397,7 +415,7 @@ final class AppModel {
     }
 
     func openSteam() {
-        guard let runner = gameRunner, let bottle = selectedBottle else { return }
+        guard let runner = gameRunner, let bottle = steamBottle else { return }
         do {
             let handle = try runner.launchSteam(bottle: bottle)
             running["steam"] = handle

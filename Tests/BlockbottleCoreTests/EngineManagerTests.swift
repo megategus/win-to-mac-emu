@@ -37,18 +37,16 @@ final class EngineManagerTests: XCTestCase {
         let http = FakeHTTPClient()
         http.json = Data(releaseJSON.utf8)
         let m = EngineManager(paths: paths, http: http, runner: FakeProcessRunner())
-        let asset = try await m.resolve(EngineManifest.wine)
+        let asset = try await m.resolve(EngineManifest.gptk)
         XCTAssertEqual(asset.name, "game-porting-toolkit-3.0-3.tar.xz")
         XCTAssertEqual(asset.url.absoluteString, "https://example.com/gptk.tar.xz")
         XCTAssertEqual(asset.sha256, "abcdef")
     }
 
-    /// Real asset names from Gcenx/macOS_Wine_builds 11.18 (no crossover builds any more).
-    func testWineFallsBackToStagingWhenGPTKHasNoMatch() async throws {
+    /// Real asset names from Gcenx/macOS_Wine_builds 11.18.
+    func testWinePicksStagingNotDevel() async throws {
         let http = FakeHTTPClient()
-        http.jsonByURL[EngineManifest.wine.sources[0].latestReleaseAPI.absoluteString] =
-            Data(#"{"assets":[{"name":"notes.txt","browser_download_url":"https://e.com/n","digest":null}]}"#.utf8)
-        http.jsonByURL[EngineManifest.wine.sources[1].latestReleaseAPI.absoluteString] = Data("""
+        http.json = Data("""
         {"assets":[
           {"name":"wine-devel-11.18-osx64.tar.xz","browser_download_url":"https://e.com/devel","digest":null},
           {"name":"wine-staging-11.18-osx64.tar.xz","browser_download_url":"https://e.com/staging","digest":null}
@@ -58,9 +56,27 @@ final class EngineManagerTests: XCTestCase {
         XCTAssertEqual(asset.name, "wine-staging-11.18-osx64.tar.xz")
     }
 
+    func testMigrationMovesOldGPTKOutOfWineFolder() throws {
+        let fm = FileManager.default
+        let oldWine = paths.engines.appendingPathComponent("Wine")
+        try fm.createDirectory(at: oldWine.appendingPathComponent("Contents"), withIntermediateDirectories: true)
+        try "game-porting-toolkit-3.0-3.tar.xz".write(to: oldWine.appendingPathComponent(".version"), atomically: true, encoding: .utf8)
+        try fm.createDirectory(at: paths.engines.appendingPathComponent("Wine-originals"), withIntermediateDirectories: true)
+
+        EngineManifest.migrate(paths: paths)
+        let m = EngineManager(paths: paths, http: FakeHTTPClient(), runner: FakeProcessRunner())
+        XCTAssertFalse(m.isInstalled(EngineManifest.wine))   // staging must now be downloaded
+        XCTAssertTrue(m.isInstalled(EngineManifest.gptk))
+        XCTAssertTrue(fm.fileExists(atPath: paths.engines.appendingPathComponent("GPTK-originals").path))
+
+        EngineManifest.migrate(paths: paths) // idempotent
+        XCTAssertTrue(m.isInstalled(EngineManifest.gptk))
+    }
+
     func testRealAssetNamesMatch() throws {
         let cases: [(EngineComponent, String)] = [
-            (EngineManifest.wine, "game-porting-toolkit-3.0-3.tar.xz"),
+            (EngineManifest.wine, "wine-staging-11.18-osx64.tar.xz"),
+            (EngineManifest.gptk, "game-porting-toolkit-3.0-3.tar.xz"),
             (EngineManifest.dxmt, "dxmt-v0.80-builtin.tar.gz"),
             (EngineManifest.dxvk, "dxvk-macOS-async-v1.10.3-20230507-repack-builtin.tar.gz"),
         ]

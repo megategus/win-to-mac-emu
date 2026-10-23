@@ -13,15 +13,15 @@ public struct GameRunner: Sendable {
 
     public let paths: AppPaths
     let runner: ProcessRunner
-    let env: WineEnvironment
     let now: @Sendable () -> Date
 
     public init(paths: AppPaths, runner: ProcessRunner, now: @escaping @Sendable () -> Date = { Date() }) {
         self.paths = paths
         self.runner = runner
-        self.env = WineEnvironment(paths: paths)
         self.now = now
     }
+
+    func env(_ bottle: Bottle) -> WineEnvironment { WineEnvironment(paths: paths, engine: bottle.engine) }
 
     public func logURL(bottle: Bottle, label: String) -> URL {
         let f = DateFormatter()
@@ -32,8 +32,9 @@ public struct GameRunner: Sendable {
     }
 
     public func launch(game: SteamGame, bottle: Bottle, profile: GameProfile) async throws -> LaunchHandle {
+        let env = env(bottle)
         let resolved = env.resolve(profile.backend)
-        try BackendSwitcher(paths: paths).activate(resolved.backend)
+        try BackendSwitcher(paths: paths, engine: bottle.engine).activate(resolved.backend)
         let log = logURL(bottle: bottle, label: game.appID)
         _ = try? await runner.run(env.retinaInvocation(prefix: bottle.prefix, enabled: profile.retinaMode), logTo: log)
         var effective = profile
@@ -52,9 +53,12 @@ public struct GameRunner: Sendable {
     }
 
     public func launchSteam(bottle: Bottle) throws -> LaunchHandle {
+        let env = env(bottle)
         let log = logURL(bottle: bottle, label: "steam")
+        // Steam's own UI runs on Wine's default graphics, never a swapped-in backend.
+        try BackendSwitcher(paths: paths, engine: bottle.engine).activate(.wined3d)
         var profile = GameProfile()
-        profile.backend = env.resolve(.d3dmetal).backend
+        profile.backend = .wined3d
         let process = try runner.start(
             env.invocation(prefix: bottle.prefix, profile: profile, program: [Self.steamExe], verbose: true), logTo: log)
         return LaunchHandle(process: process, logURL: log, backend: profile.backend, fellBack: false)
@@ -64,12 +68,13 @@ public struct GameRunner: Sendable {
         let label = URL(fileURLWithPath: args.first ?? "tool").deletingPathExtension().lastPathComponent
         let log = logURL(bottle: bottle, label: label)
         let process = try runner.start(
-            env.tool(prefix: bottle.prefix, args, verbose: true, workingDirectory: workingDirectory), logTo: log)
+            env(bottle).tool(prefix: bottle.prefix, args, verbose: true, workingDirectory: workingDirectory), logTo: log)
         return LaunchHandle(process: process, logURL: log, backend: .wined3d, fellBack: false)
     }
 
     /// Kills every wine process in the bottle.
     public func killBottle(_ bottle: Bottle) async {
+        let env = env(bottle)
         let inv = WineInvocation(executable: env.wineserverBinary, arguments: ["-k"],
                                  environment: env.baseEnvironment(prefix: bottle.prefix))
         _ = try? await runner.run(inv, logTo: nil)

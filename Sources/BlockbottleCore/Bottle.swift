@@ -5,18 +5,31 @@ public struct Bottle: Codable, Identifiable, Hashable, Sendable {
     public var name: String
     public var windowsVersion: String
     public var createdAt: Date
+    public var engine: WineEngine
     /// Set by `BottleStore` when loading; not persisted.
     public var prefix: URL = URL(fileURLWithPath: "/")
 
-    enum CodingKeys: String, CodingKey { case id, name, windowsVersion, createdAt }
+    enum CodingKeys: String, CodingKey { case id, name, windowsVersion, createdAt, engine }
 
     public init(id: UUID = UUID(), name: String, windowsVersion: String = "win10",
-                createdAt: Date = Date(), prefix: URL) {
+                createdAt: Date = Date(), engine: WineEngine = .staging, prefix: URL) {
         self.id = id
         self.name = name
         self.windowsVersion = windowsVersion
         self.createdAt = createdAt
+        self.engine = engine
         self.prefix = prefix
+    }
+
+    /// Bottles from older builds have no engine field; they were Steam bottles,
+    /// which now belong on Wine Staging.
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(UUID.self, forKey: .id)
+        name = try c.decode(String.self, forKey: .name)
+        windowsVersion = try c.decodeIfPresent(String.self, forKey: .windowsVersion) ?? "win10"
+        createdAt = try c.decode(Date.self, forKey: .createdAt)
+        engine = try c.decodeIfPresent(WineEngine.self, forKey: .engine) ?? .staging
     }
 }
 
@@ -71,11 +84,11 @@ public struct BottleStore: Sendable {
     }
 
     @discardableResult
-    public func create(name: String) throws -> Bottle {
+    public func create(name: String, engine: WineEngine = .staging) throws -> Bottle {
         let id = UUID()
         let dir = paths.bottles.appendingPathComponent(id.uuidString, isDirectory: true)
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        let bottle = Bottle(id: id, name: name, prefix: dir)
+        let bottle = Bottle(id: id, name: name, engine: engine, prefix: dir)
         try save(bottle)
         return bottle
     }

@@ -34,4 +34,13 @@ final class BottleStoreTests: XCTestCase {
         XCTAssertTrue(store.list().isEmpty)
         XCTAssertThrowsError(try store.delete(root))
     }
+
+    func testOldBottleWithoutEngineDecodesAsStaging() throws {
+        let b = try store.create(name: "Old")
+        let legacy = #"{"createdAt":"2026-10-23T14:00:00Z","id":"\#(b.id.uuidString)","name":"Old","windowsVersion":"win10"}"#
+        try legacy.write(to: b.prefix.appendingPathComponent("bottle.json"), atomically: true, encoding: .utf8)
+        XCTAssertEqual(store.list().first?.bottle?.engine, .staging)
+        let gptk = try store.create(name: "D3DMetal", engine: .gptk)
+        XCTAssertEqual(store.list().compactMap(\.bottle).first { $0.id == gptk.id }?.engine, .gptk)
+    }
 }

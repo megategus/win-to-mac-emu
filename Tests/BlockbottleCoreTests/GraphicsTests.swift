@@ -73,7 +73,7 @@ final class GraphicsTests: XCTestCase {
 
     /// Mirrors the real layout of Gcenx's GPTK 3.0 download.
     private func makeWine(_ fm: FileManager) throws -> URL {
-        let lib = paths.engines.appendingPathComponent("Wine/Contents/Resources/wine/lib")
+        let lib = paths.engines.appendingPathComponent("GPTK/Game Porting Toolkit.app/Contents/Resources/wine/lib")
         for dir in ["wine/x86_64-windows", "wine/i386-windows", "wine/x86_64-unix", "external/D3DMetal.framework"] {
             try fm.createDirectory(at: lib.appendingPathComponent(dir), withIntermediateDirectories: true)
         }
@@ -92,17 +92,25 @@ final class GraphicsTests: XCTestCase {
         }
     }
 
-    func testD3DMetalDetectedInsideWine() throws {
-        XCTAssertFalse(WineEnvironment(paths: paths).installedBackends().contains(.d3dmetal))
+    func testD3DMetalOnlyOnGPTKEngine() throws {
+        XCTAssertFalse(WineEnvironment(paths: paths, engine: .gptk).installedBackends().contains(.d3dmetal))
         _ = try makeWine(.default)
-        XCTAssertTrue(WineEnvironment(paths: paths).installedBackends().contains(.d3dmetal))
+        XCTAssertTrue(WineEnvironment(paths: paths, engine: .gptk).installedBackends().contains(.d3dmetal))
+        XCTAssertFalse(WineEnvironment(paths: paths, engine: .staging).installedBackends().contains(.d3dmetal))
+    }
+
+    func testStagingPrefersDXMTWhenD3DMetalMissing() throws {
+        try makeDXMT(.default)
+        let r = WineEnvironment(paths: paths, engine: .staging).resolve(.d3dmetal)
+        XCTAssertEqual(r.backend, .dxmt)
+        XCTAssertTrue(r.fellBack)
     }
 
     func testActivateDXMTOverlaysAndD3DMetalRestores() throws {
         let fm = FileManager.default
         let wine = try makeWine(fm)
         try makeDXMT(fm)
-        let switcher = BackendSwitcher(paths: paths)
+        let switcher = BackendSwitcher(paths: paths, engine: .gptk)
 
         try switcher.activate(.dxmt)
         XCTAssertEqual(try String(contentsOf: wine.appendingPathComponent("x86_64-windows/d3d11.dll")), "dxmt")

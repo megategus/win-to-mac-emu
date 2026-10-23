@@ -24,7 +24,7 @@ public struct SteamDiagnostics: Sendable {
                                 "connection_log.txt", "stderr.txt", "content_log.txt"]
 
     public func report(bottle: Bottle, fileManager fm: FileManager = .default) -> String {
-        let env = WineEnvironment(paths: paths)
+        let env = WineEnvironment(paths: paths, engine: bottle.engine)
         let steamRoot = SteamLibraryScanner().steamRoot(in: bottle.prefix)
         let steamExe = steamRoot.appendingPathComponent("steam.exe")
         var out: [String] = []
@@ -44,8 +44,8 @@ public struct SteamDiagnostics: Sendable {
             out.append("engine \(c.id): \(v)")
         }
         out.append("installed backends: \(env.installedBackends().map(\.rawValue).sorted().joined(separator: ", "))")
-        out.append("active backend: \(BackendSwitcher(paths: paths).active?.rawValue ?? "none")")
-        out.append("bottle: \(bottle.name) \(bottle.prefix.path)")
+        out.append("active backend: \(BackendSwitcher(paths: paths, engine: bottle.engine).active?.rawValue ?? "none")")
+        out.append("bottle: \(bottle.name) [\(bottle.engine.rawValue)] \(bottle.prefix.path)")
         out.append("steam.exe: \(fm.fileExists(atPath: steamExe.path) ? "present" : "MISSING")")
         let topLevel = (try? fm.contentsOfDirectory(atPath: steamRoot.path))?.sorted() ?? []
         out.append("Steam folder: \(topLevel.joined(separator: ", "))")

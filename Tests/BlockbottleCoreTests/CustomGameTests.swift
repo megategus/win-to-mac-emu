@@ -38,4 +38,14 @@ final class CustomGameTests: XCTestCase {
         XCTAssertEqual(inv.workingDirectory?.path, "/Volumes/Untitled/Games/My Game/bin")
         XCTAssertEqual(inv.environment["WINEPREFIX"], bottle.prefix.path)
     }
+
+    func testCustomGamesFilteredByBottle() throws {
+        let store = CustomGameStore(paths: paths)
+        let a = UUID(), b = UUID()
+        try store.add(executable: URL(fileURLWithPath: "/g/a.exe"), name: "A", bottleID: a)
+        try store.add(executable: URL(fileURLWithPath: "/g/b.exe"), name: "B", bottleID: b)
+        try store.add(executable: URL(fileURLWithPath: "/g/any.exe"), name: "Any")
+        XCTAssertEqual(store.list(bottleID: a).map(\.name), ["A", "Any"])
+        XCTAssertEqual(store.list().count, 3)
+    }
 }

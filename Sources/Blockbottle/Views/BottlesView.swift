@@ -4,6 +4,7 @@ import SwiftUI
 struct BottlesView: View {
     @Environment(AppModel.self) private var model
     @State private var newName = ""
+    @State private var newEngine: WineEngine = .staging
     @State private var creating = false
     @State private var pendingDelete: BottleEntry?
 
@@ -25,10 +26,15 @@ struct BottlesView: View {
                     TextField("New bottle name", text: $newName)
                         .textFieldStyle(.roundedBorder)
                         .font(.pixel(12))
+                    Picker("", selection: $newEngine) {
+                        ForEach(WineEngine.allCases) { Text($0.displayName).tag($0) }
+                    }
+                    .labelsHidden()
+                    .frame(width: 230)
                     Button(creating ? "Building…" : "Create") {
                         creating = true
                         Task {
-                            await model.createBottle(named: newName)
+                            await model.createBottle(named: newName, engine: newEngine)
                             newName = ""
                             creating = false
                         }
@@ -58,6 +64,12 @@ struct BottlesView: View {
         }
     }
 
+    private func bottleSubtitle(_ bottle: Bottle) -> String {
+        guard bottle.engine.runsSteam else { return "\(bottle.engine.displayName) · for games added with Add game…" }
+        let steam = model.steamInstaller?.isInstalled(bottle: bottle) == true ? "Steam installed" : "No Steam"
+        return "\(bottle.engine.displayName) · \(steam)"
+    }
+
     @ViewBuilder
     private func row(_ entry: BottleEntry) -> some View {
         HStack(spacing: 10) {
@@ -67,7 +79,7 @@ struct BottlesView: View {
                     .font(.pixel(12)).foregroundStyle(Palette.grassGreen)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(bottle.name).font(.pixel(13)).foregroundStyle(Palette.textDark)
-                    Text(model.steamInstaller?.isInstalled(bottle: bottle) == true ? "Steam installed" : "No Steam")
+                    Text(bottleSubtitle(bottle))
                         .font(.pixel(10)).foregroundStyle(Palette.panelDark)
                 }
                 Spacer()

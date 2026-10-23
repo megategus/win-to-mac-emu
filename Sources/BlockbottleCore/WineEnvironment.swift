@@ -18,10 +18,14 @@ public struct WineInvocation: Equatable, Sendable {
 /// Builds wine command lines and environments from a profile.
 public struct WineEnvironment: Sendable {
     public let paths: AppPaths
+    public let engine: WineEngine
 
-    public init(paths: AppPaths) { self.paths = paths }
+    public init(paths: AppPaths, engine: WineEngine = .staging) {
+        self.paths = paths
+        self.engine = engine
+    }
 
-    public var wineRoot: URL { paths.engines.appendingPathComponent("Wine", isDirectory: true) }
+    public var wineRoot: URL { paths.engines.appendingPathComponent(engine.component.installDir, isDirectory: true) }
 
     /// Gcenx builds ship either as an app bundle or a plain tree.
     public var wineBinary: URL {
@@ -53,9 +57,11 @@ public struct WineEnvironment: Sendable {
         return result
     }
 
-    /// Falls back to WineD3D when the wanted backend's files are missing.
+    /// Uses the wanted backend if installed, else DXMT, else Wine's default.
     public func resolve(_ wanted: GraphicsBackend) -> (backend: GraphicsBackend, fellBack: Bool) {
-        installedBackends().contains(wanted) ? (wanted, false) : (.wined3d, wanted != .wined3d)
+        let installed = installedBackends()
+        let pick = [wanted, .dxmt, .wined3d].first(where: installed.contains) ?? .wined3d
+        return (pick, pick != wanted)
     }
 
     /// `verbose` keeps Wine's error channel so logs are useful for diagnosis;
@@ -105,8 +111,12 @@ public struct WineEnvironment: Sendable {
 /// a time for the shared Wine install.
 public struct BackendSwitcher: Sendable {
     public let paths: AppPaths
+    public let engine: WineEngine
 
-    public init(paths: AppPaths) { self.paths = paths }
+    public init(paths: AppPaths, engine: WineEngine = .staging) {
+        self.paths = paths
+        self.engine = engine
+    }
 
     static let archAliases: [String: String] = [
         "x86_64-windows": "x86_64-windows", "x64": "x86_64-windows",
@@ -114,11 +124,11 @@ public struct BackendSwitcher: Sendable {
         "x86_64-unix": "x86_64-unix",
     ]
 
-    var wineLib: URL? {
-        EngineLayout.find("lib/wine", under: paths.engines.appendingPathComponent("Wine", isDirectory: true))
-    }
+    var wineLib: URL? { EngineLayout.find("lib/wine", under: WineEnvironment(paths: paths, engine: engine).wineRoot) }
 
-    var stateDir: URL { paths.engines.appendingPathComponent("Wine-originals", isDirectory: true) }
+    var stateDir: URL {
+        paths.engines.appendingPathComponent("\(engine.component.installDir)-originals", isDirectory: true)
+    }
     private var activeFile: URL { stateDir.appendingPathComponent(".active") }
     private var overlayFile: URL { stateDir.appendingPathComponent(".overlay") }
 

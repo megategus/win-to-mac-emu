@@ -11,7 +11,7 @@ struct LibraryView: View {
             toolbar
             ScrollView {
                 LazyVGrid(columns: columns, spacing: 12) {
-                    steamSlot
+                    if model.selectedBottle?.engine.runsSteam ?? true { steamSlot }
                     ForEach(model.games) { game in
                         GameSlot(game: game, selected: model.selectedGame == game, running: model.isRunning(game))
                             .onTapGesture { model.selectedGame = game }
@@ -46,10 +46,12 @@ struct LibraryView: View {
                     model.selectedBottleID = $0
                     model.refreshLibrary()
                 })) {
-                    ForEach(model.bottles.compactMap(\.bottle)) { b in Text(b.name).tag(Optional(b.id)) }
+                    ForEach(model.bottles.compactMap(\.bottle)) { b in
+                        Text("\(b.name) · \(b.engine == .gptk ? "D3DMetal" : "Steam")").tag(Optional(b.id))
+                    }
                 }
                 .labelsHidden()
-                .frame(width: 200)
+                .frame(width: 240)
             }
             Spacer()
             Button("Add game…") { model.addCustomGame() }
@@ -60,9 +62,11 @@ struct LibraryView: View {
                 .buttonStyle(.block(.stone, minWidth: 140, fontSize: 13))
             Button("Refresh") { model.refreshLibrary() }
                 .buttonStyle(.block(.stone, minWidth: 100, fontSize: 13))
-            Button(model.running["steam"] != nil ? "Steam running" : "Open Steam") { model.openSteam() }
-                .buttonStyle(.block(.green, minWidth: 160, fontSize: 13))
-                .disabled(model.running["steam"] != nil)
+            if model.selectedBottle?.engine.runsSteam ?? true {
+                Button(model.running["steam"] != nil ? "Steam running" : "Open Steam") { model.openSteam() }
+                    .buttonStyle(.block(.green, minWidth: 160, fontSize: 13))
+                    .disabled(model.running["steam"] != nil)
+            }
         }
         .padding(.horizontal, 24)
     }

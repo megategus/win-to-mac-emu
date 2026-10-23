@@ -7,6 +7,8 @@ public struct CustomGameStore: Sendable {
         let id: UUID
         let name: String
         let exePath: String
+        /// Bottle the game runs in; nil (older entries) shows in every bottle.
+        let bottleID: UUID?
     }
 
     public let paths: AppPaths
@@ -32,11 +34,14 @@ public struct CustomGameStore: Sendable {
                          installDir: exe.deletingLastPathComponent(), executable: exe)
     }
 
-    public func list() -> [SteamGame] { load().map(game) }
+    /// All games, or only those belonging to `bottleID` (plus unassigned ones).
+    public func list(bottleID: UUID? = nil) -> [SteamGame] {
+        load().filter { bottleID == nil || $0.bottleID == nil || $0.bottleID == bottleID }.map(game)
+    }
 
     @discardableResult
-    public func add(executable: URL, name: String) throws -> SteamGame {
-        let entry = Entry(id: UUID(), name: name, exePath: executable.standardizedFileURL.path)
+    public func add(executable: URL, name: String, bottleID: UUID? = nil) throws -> SteamGame {
+        let entry = Entry(id: UUID(), name: name, exePath: executable.standardizedFileURL.path, bottleID: bottleID)
         try save(load() + [entry])
         return game(entry)
     }

@@ -1,0 +1,82 @@
+import Foundation
+
+public struct LaunchHandle: Sendable {
+    public let process: RunningProcess
+    public let logURL: URL
+    public let backend: GraphicsBackend
+    public let fellBack: Bool
+}
+
+/// Starts games and Steam inside a bottle and records a log per launch.
+public struct GameRunner: Sendable {
+    public static let steamExe = "C:\\Program Files (x86)\\Steam\\steam.exe"
+
+    public let paths: AppPaths
+    let runner: ProcessRunner
+    let now: @Sendable () -> Date
+
+    public init(paths: AppPaths, runner: ProcessRunner, now: @escaping @Sendable () -> Date = { Date() }) {
+        self.paths = paths
+        self.runner = runner
+        self.now = now
+    }
+
+    func env(_ bottle: Bottle) -> WineEnvironment { WineEnvironment(paths: paths, engine: bottle.engine) }
+
+    public func logURL(bottle: Bottle, label: String) -> URL {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.dateFormat = "yyyyMMdd-HHmmss"
+        return paths.logs.appendingPathComponent(bottle.id.uuidString, isDirectory: true)
+            .appendingPathComponent("\(f.string(from: now()))-\(label).log")
+    }
+
+    public func launch(game: SteamGame, bottle: Bottle, profile: GameProfile) async throws -> LaunchHandle {
+        let env = env(bottle)
+        let resolved = env.resolve(profile.backend)
+        try BackendSwitcher(paths: paths, engine: bottle.engine).activate(resolved.backend)
+        let log = logURL(bottle: bottle, label: game.appID)
+        _ = try? await runner.run(env.retinaInvocation(prefix: bottle.prefix, enabled: profile.retinaMode), logTo: log)
+        var effective = profile
+        effective.backend = resolved.backend
+        var invocation: WineInvocation
+        if let exe = game.executable {
+            invocation = env.invocation(prefix: bottle.prefix, profile: effective, program: [exe.path] + profile.argumentList)
+            // Many games load data relative to their own folder.
+            invocation.workingDirectory = exe.deletingLastPathComponent()
+        } else {
+            let program = [Self.steamExe, "-applaunch", game.appID] + profile.argumentList
+            invocation = env.invocation(prefix: bottle.prefix, profile: effective, program: program)
+        }
+        let process = try runner.start(invocation, logTo: log)
+        return LaunchHandle(process: process, logURL: log, backend: resolved.backend, fellBack: resolved.fellBack)
+    }
+
+    public func launchSteam(bottle: Bottle) throws -> LaunchHandle {
+        let env = env(bottle)
+        let log = logURL(bottle: bottle, label: "steam")
+        // Steam's own UI runs on Wine's default graphics, never a swapped-in backend.
+        try BackendSwitcher(paths: paths, engine: bottle.engine).activate(.wined3d)
+        var profile = GameProfile()
+        profile.backend = .wined3d
+        let process = try runner.start(
+            env.invocation(prefix: bottle.prefix, profile: profile, program: [Self.steamExe], verbose: true), logTo: log)
+        return LaunchHandle(process: process, logURL: log, backend: profile.backend, fellBack: false)
+    }
+
+    public func runTool(_ args: [String], bottle: Bottle, workingDirectory: URL? = nil) throws -> LaunchHandle {
+        let label = URL(fileURLWithPath: args.first ?? "tool").deletingPathExtension().lastPathComponent
+        let log = logURL(bottle: bottle, label: label)
+        let process = try runner.start(
+            env(bottle).tool(prefix: bottle.prefix, args, verbose: true, workingDirectory: workingDirectory), logTo: log)
+        return LaunchHandle(process: process, logURL: log, backend: .wined3d, fellBack: false)
+    }
+
+    /// Kills every wine process in the bottle.
+    public func killBottle(_ bottle: Bottle) async {
+        let env = env(bottle)
+        let inv = WineInvocation(executable: env.wineserverBinary, arguments: ["-k"],
+                                 environment: env.baseEnvironment(prefix: bottle.prefix))
+        _ = try? await runner.run(inv, logTo: nil)
+    }
+}

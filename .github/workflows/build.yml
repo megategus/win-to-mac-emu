@@ -1,0 +1,38 @@
+name: build
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - name: Select Xcode
+        run: sudo xcode-select -s "$(ls -d /Applications/Xcode_16*.app | sort -V | tail -1)" || true
+      - run: swift --version
+      - name: Test core
+        run: swift test
+      - name: Build app bundle
+        run: scripts/build-app.sh
+      - name: Smoke-test launch
+        run: |
+          build/Blockbottle.app/Contents/MacOS/Blockbottle &
+          PID=$!
+          sleep 8
+          kill -0 "$PID"   # still running = didn't crash on startup
+          kill "$PID"
+      - name: Make DMG
+        run: scripts/make-dmg.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Blockbottle-dmg
+          path: build/Blockbottle.dmg
+          if-no-files-found: error

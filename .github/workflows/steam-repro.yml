@@ -1,0 +1,21 @@
+name: steam-repro
+
+# Runs Steam inside the same Wine engines Blockbottle downloads, to diagnose
+# Steam start-up crashes. Run manually from the Actions tab.
+on:
+  workflow_dispatch:
+  push:
+    paths: [".github/workflows/steam-repro.yml", "scripts/ci/steam-repro.sh"]
+
+jobs:
+  repro:
+    runs-on: macos-14
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        engine: [gptk, staging]
+        sync: [on, off]
+    steps:
+      - uses: actions/checkout@v4
+      - run: scripts/ci/steam-repro.sh ${{ matrix.engine }} ${{ matrix.sync }}

@@ -85,4 +85,20 @@ final class GraphicsTests: XCTestCase {
         XCTAssertTrue(fm.fileExists(atPath: prefix.appendingPathComponent("drive_c/windows/system32/d3d11.dll").path))
         XCTAssertTrue(fm.fileExists(atPath: prefix.appendingPathComponent("drive_c/windows/syswow64/d3d9.dll").path))
     }
+
+    func testPrepareCopiesDXMTUnixLibraryIntoWine() throws {
+        let fm = FileManager.default
+        let wineUnix = paths.engines.appendingPathComponent("Wine/Contents/Resources/wine/lib/wine/x86_64-unix")
+        try fm.createDirectory(at: wineUnix, withIntermediateDirectories: true)
+        let dxmt = paths.engines.appendingPathComponent("DXMT/v0.6")
+        for (dir, file) in [("x86_64-windows", "winemetal.dll"), ("x86_64-unix", "winemetal.so")] {
+            let d = dxmt.appendingPathComponent(dir)
+            try fm.createDirectory(at: d, withIntermediateDirectories: true)
+            try Data("x".utf8).write(to: d.appendingPathComponent(file))
+        }
+        let prefix = root.appendingPathComponent("prefix")
+        try BackendInstaller(paths: paths).prepare(.dxmt, prefix: prefix)
+        XCTAssertTrue(fm.fileExists(atPath: wineUnix.appendingPathComponent("winemetal.so").path))
+        XCTAssertTrue(fm.fileExists(atPath: prefix.appendingPathComponent("drive_c/windows/system32/winemetal.dll").path))
+    }
 }

@@ -105,11 +105,16 @@ public struct BackendInstaller: Sendable {
         let system32 = prefix.appendingPathComponent("drive_c/windows/system32", isDirectory: true)
         let syswow64 = prefix.appendingPathComponent("drive_c/windows/syswow64", isDirectory: true)
         guard let walker = fileManager.enumerator(at: source, includingPropertiesForKeys: nil) else { return }
-        for case let file as URL in walker where file.pathExtension.lowercased() == "dll" {
+        let wineUnix = EngineLayout.find("lib/wine", under: paths.engines.appendingPathComponent("Wine", isDirectory: true))?
+            .appendingPathComponent("x86_64-unix", isDirectory: true)
+        for case let file as URL in walker {
+            let ext = file.pathExtension.lowercased()
             let parent = file.deletingLastPathComponent().lastPathComponent.lowercased()
             let target: URL
-            if Self.x64Dirs.contains(parent) { target = system32 }
-            else if Self.x32Dirs.contains(parent) { target = syswow64 }
+            if ext == "dll", Self.x64Dirs.contains(parent) { target = system32 }
+            else if ext == "dll", Self.x32Dirs.contains(parent) { target = syswow64 }
+            // DXMT's unix half (winemetal.so) must sit next to Wine's own .so files.
+            else if ext == "so", parent == "x86_64-unix", let wineUnix { target = wineUnix }
             else { continue }
             try fileManager.createDirectory(at: target, withIntermediateDirectories: true)
             let dest = target.appendingPathComponent(file.lastPathComponent)

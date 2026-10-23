@@ -16,9 +16,12 @@ public enum HTTPError: Error, Equatable {
 public final class URLSessionHTTPClient: NSObject, HTTPClient, URLSessionDownloadDelegate, @unchecked Sendable {
     private let lock = NSLock()
     private var handlers: [Int: (progress: @Sendable (Double) -> Void, cont: CheckedContinuation<URL, Error>)] = [:]
-    private lazy var session = URLSession(configuration: .default, delegate: self, delegateQueue: nil)
+    private var session: URLSession!
 
-    public override init() { super.init() }
+    public override init() {
+        super.init()
+        session = URLSession(configuration: .default, delegate: self, delegateQueue: nil)
+    }
 
     private func request(_ url: URL) -> URLRequest {
         var r = URLRequest(url: url)

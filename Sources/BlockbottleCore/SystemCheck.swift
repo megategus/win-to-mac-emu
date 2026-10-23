@@ -25,7 +25,7 @@ public struct SystemCheck: Sendable {
     let osVersion: OperatingSystemVersion
 
     public init(runner: ProcessRunner,
-                machine: @escaping @Sendable () -> String = SystemCheck.hardwareMachine,
+                machine: @escaping @Sendable () -> String = { SystemCheck.hardwareMachine() },
                 osVersion: OperatingSystemVersion = ProcessInfo.processInfo.operatingSystemVersion) {
         self.runner = runner
         self.machine = machine
@@ -42,8 +42,10 @@ public struct SystemCheck: Sendable {
     public static func hardwareMachine() -> String {
         var info = utsname()
         uname(&info)
-        return withUnsafePointer(to: &info.machine) {
-            $0.withMemoryRebound(to: CChar.self, capacity: MemoryLayout.size(ofValue: info.machine)) { String(cString: $0) }
+        var machine = info.machine
+        let size = MemoryLayout.size(ofValue: machine)
+        return withUnsafePointer(to: &machine) {
+            $0.withMemoryRebound(to: CChar.self, capacity: size) { String(cString: $0) }
         }
     }
 }

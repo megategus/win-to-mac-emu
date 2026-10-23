@@ -16,7 +16,7 @@ public struct GameRunner: Sendable {
     let env: WineEnvironment
     let now: @Sendable () -> Date
 
-    public init(paths: AppPaths, runner: ProcessRunner, now: @escaping @Sendable () -> Date = Date.init) {
+    public init(paths: AppPaths, runner: ProcessRunner, now: @escaping @Sendable () -> Date = { Date() }) {
         self.paths = paths
         self.runner = runner
         self.env = WineEnvironment(paths: paths)

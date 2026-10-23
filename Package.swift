@@ -10,11 +10,7 @@ let package = Package(
     ],
     targets: [
         .target(name: "BlockbottleCore"),
-        .executableTarget(
-            name: "Blockbottle",
-            dependencies: ["BlockbottleCore"],
-            resources: [.process("Resources")]
-        ),
+        .executableTarget(name: "Blockbottle", dependencies: ["BlockbottleCore"]),
         .testTarget(name: "BlockbottleCoreTests", dependencies: ["BlockbottleCore"]),
     ]
 )

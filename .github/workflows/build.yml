@@ -20,5 +20,19 @@ jobs:
       - run: swift --version
       - name: Test core
         run: swift test
-      - name: Build app
-        run: swift build -c release --arch arm64
+      - name: Build app bundle
+        run: scripts/build-app.sh
+      - name: Smoke-test launch
+        run: |
+          build/Blockbottle.app/Contents/MacOS/Blockbottle &
+          PID=$!
+          sleep 8
+          kill -0 "$PID"   # still running = didn't crash on startup
+          kill "$PID"
+      - name: Make DMG
+        run: scripts/make-dmg.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Blockbottle-dmg
+          path: build/Blockbottle.dmg
+          if-no-files-found: error

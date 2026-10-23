@@ -9,7 +9,8 @@ enum PixelFont {
     static func register() {
         guard !registered else { return }
         registered = true
-        if let url = Bundle.module.url(forResource: "Monocraft", withExtension: "ttf") {
+        // Copied into Contents/Resources by scripts/build-app.sh.
+        if let url = Bundle.main.url(forResource: "Monocraft", withExtension: "ttf") {
             CTFontManagerRegisterFontsForURL(url as CFURL, .process, nil)
         }
     }

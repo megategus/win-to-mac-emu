@@ -1,0 +1,21 @@
+name: probe-engines
+
+on:
+  workflow_dispatch:
+  push:
+    paths: [".github/workflows/probe-engines.yml"]
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - name: List release assets of engine repos
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          for r in Gcenx/macOS_Wine_builds Gcenx/game-porting-toolkit 3Shain/dxmt Gcenx/DXVK-macOS; do
+            echo "=== $r"
+            gh api "repos/$r/releases?per_page=6" --jq '.[] | "TAG \(.tag_name) prerelease=\(.prerelease)", (.assets[] | "  \(.name)  digest=\(.digest // "none")")'
+            echo "--- latest:"
+            gh api "repos/$r/releases/latest" --jq '.tag_name' || true
+          done

@@ -35,14 +35,25 @@ echo "=== SteamSetup /S"; run_for 300 setup.log "$WINE" SteamSetup.exe /S; tail 
 STEAM="$WINEPREFIX/drive_c/Program Files (x86)/Steam"
 ls "$STEAM" | head -30
 
-echo "=== steam.exe (240s)"
-run_for 240 steam.log "$WINE" "C:\\Program Files (x86)\\Steam\\steam.exe"
+echo "=== steam.exe (watching 300s, including Steam's self-restart)"
+"$WINE" "C:\\Program Files (x86)\\Steam\\steam.exe" >steam.log 2>&1 &
+for t in $(seq 1 10); do
+  sleep 30
+  echo "--- t=$((t*30))s windows processes:"
+  ps -axo pid,etime,command | grep -i '\.exe' | grep -v grep | sed 's/^ *//' | cut -c1-160 | head -15
+done
 "$(dirname "$WINE")/wineserver" -k 2>/dev/null; sleep 2
 
 echo "=== crashes"
-grep -n -B3 -A25 "page fault\|Unhandled exception" steam.log | head -150 || echo "no crash lines"
+grep -n -B5 -A30 "page fault\|Unhandled exception\|nested exception" steam.log | head -200 || echo "no crash lines"
 echo "=== steam.log tail"; tail -60 steam.log
-for f in bootstrap_log.txt webhelper.txt cef_log.txt stderr.txt; do
-  [ -f "$STEAM/logs/$f" ] && { echo "=== Steam/logs/$f"; tail -40 "$STEAM/logs/$f"; }
+echo "=== Steam/logs listing"; ls -la "$STEAM/logs" 2>/dev/null
+for f in "$STEAM"/logs/*.txt; do
+  [ -f "$f" ] || continue
+  case "$(basename "$f")" in bootstrap_log.txt) n=15 ;; *) n=40 ;; esac
+  echo "=== Steam/logs/$(basename "$f")"; tail -$n "$f"
+done
+for d in "$STEAM"/dumps "$WINEPREFIX/drive_c/users"/*/AppData/Local/CrashDumps; do
+  [ -d "$d" ] && { echo "=== crash dumps in $d"; ls -la "$d"; }
 done
 ls -la "$STEAM" | head -40

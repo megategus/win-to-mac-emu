@@ -8,14 +8,25 @@ on:
 jobs:
   probe:
     runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
     steps:
-      - name: List release assets of engine repos
-        env:
-          GH_TOKEN: ${{ github.token }}
+      - name: Find any wine-crossover asset across all releases
         run: |
-          for r in Gcenx/macOS_Wine_builds Gcenx/game-porting-toolkit 3Shain/dxmt Gcenx/DXVK-macOS; do
-            echo "=== $r"
-            gh api "repos/$r/releases?per_page=6" --jq '.[] | "TAG \(.tag_name) prerelease=\(.prerelease)", (.assets[] | "  \(.name)  digest=\(.digest // "none")")'
-            echo "--- latest:"
-            gh api "repos/$r/releases/latest" --jq '.tag_name' || true
-          done
+          gh api --paginate "repos/Gcenx/macOS_Wine_builds/releases?per_page=100" \
+            --jq '.[] | .tag_name as $t | .assets[] | select(.name|test("crossover")) | "\($t)  \(.name)"' | head -20
+      - name: Inspect archive layouts
+        run: |
+          set -o pipefail
+          peek() {
+            echo "=== $1"
+            curl -sSL "$2" -o a.tar
+            tar -tf a.tar | awk -F/ '{print $1"/"$2"/"$3"/"$4"/"$5}' | sort -u | head -60
+            echo "--- key files:"
+            tar -tf a.tar | grep -E '/bin/wine(64)?$|D3DMetal|libd3dshared|winemetal|/lib/wine/[^/]+/$|d3d11\.dll$|d3d12\.dll$' | head -30
+            rm -f a.tar
+          }
+          peek staging https://github.com/Gcenx/macOS_Wine_builds/releases/download/11.18/wine-staging-11.18-osx64.tar.xz
+          peek gptk https://github.com/Gcenx/game-porting-toolkit/releases/download/Game-Porting-Toolkit-3.0-3/game-porting-toolkit-3.0-3.tar.xz
+          peek dxmt https://github.com/3Shain/dxmt/releases/download/v0.80/dxmt-v0.80-builtin.tar.gz
+          peek dxvk https://github.com/Gcenx/DXVK-macOS/releases/download/v1.10.3-20230507-repack/dxvk-macOS-async-v1.10.3-20230507-repack-builtin.tar.gz

@@ -28,7 +28,7 @@ final class GraphicsTests: XCTestCase {
         let inv = WineEnvironment(paths: paths).invocation(prefix: root, profile: profile, program: ["game.exe"])
         let overrides = try XCTUnwrap(inv.environment["WINEDLLOVERRIDES"])
         for dll in ["d3d11", "dxgi", "d3d10core"] { XCTAssertTrue(overrides.contains(dll)) }
-        XCTAssertTrue(overrides.hasSuffix("=n,b"))
+        XCTAssertTrue(overrides.hasSuffix("=b"))
     }
 
     func testMissingBackendFallsBackToWineD3D() {
@@ -71,34 +71,54 @@ final class GraphicsTests: XCTestCase {
         XCTAssertEqual(p.argumentList, ["-dx11", "-windowed"])
     }
 
-    func testPrepareCopiesDLLsByArch() throws {
-        let fm = FileManager.default
-        let dxvk = paths.engines.appendingPathComponent("DXVK/dxvk-1.0")
-        for (dir, dll) in [("x64", "d3d11.dll"), ("x32", "d3d9.dll")] {
-            let d = dxvk.appendingPathComponent(dir)
-            try fm.createDirectory(at: d, withIntermediateDirectories: true)
-            try Data("x".utf8).write(to: d.appendingPathComponent(dll))
+    /// Mirrors the real layout of Gcenx's GPTK 3.0 download.
+    private func makeWine(_ fm: FileManager) throws -> URL {
+        let lib = paths.engines.appendingPathComponent("Wine/Contents/Resources/wine/lib")
+        for dir in ["wine/x86_64-windows", "wine/i386-windows", "wine/x86_64-unix", "external/D3DMetal.framework"] {
+            try fm.createDirectory(at: lib.appendingPathComponent(dir), withIntermediateDirectories: true)
         }
-        let prefix = root.appendingPathComponent("prefix")
-        try BackendInstaller(paths: paths).prepare(.dxvk, prefix: prefix)
-        try BackendInstaller(paths: paths).prepare(.dxvk, prefix: prefix) // idempotent
-        XCTAssertTrue(fm.fileExists(atPath: prefix.appendingPathComponent("drive_c/windows/system32/d3d11.dll").path))
-        XCTAssertTrue(fm.fileExists(atPath: prefix.appendingPathComponent("drive_c/windows/syswow64/d3d9.dll").path))
+        try Data("d3dmetal".utf8).write(to: lib.appendingPathComponent("wine/x86_64-windows/d3d11.dll"))
+        try Data("d3dmetal".utf8).write(to: lib.appendingPathComponent("wine/x86_64-windows/d3d12.dll"))
+        return lib.appendingPathComponent("wine")
     }
 
-    func testPrepareCopiesDXMTUnixLibraryIntoWine() throws {
-        let fm = FileManager.default
-        let wineUnix = paths.engines.appendingPathComponent("Wine/Contents/Resources/wine/lib/wine/x86_64-unix")
-        try fm.createDirectory(at: wineUnix, withIntermediateDirectories: true)
-        let dxmt = paths.engines.appendingPathComponent("DXMT/v0.6")
-        for (dir, file) in [("x86_64-windows", "winemetal.dll"), ("x86_64-unix", "winemetal.so")] {
-            let d = dxmt.appendingPathComponent(dir)
-            try fm.createDirectory(at: d, withIntermediateDirectories: true)
-            try Data("x".utf8).write(to: d.appendingPathComponent(file))
+    /// Mirrors dxmt-v0.80-builtin.tar.gz.
+    private func makeDXMT(_ fm: FileManager) throws {
+        let root = paths.engines.appendingPathComponent("DXMT/v0.80")
+        for (dir, file) in [("x86_64-windows", "d3d11.dll"), ("x86_64-windows", "winemetal.dll"),
+                            ("i386-windows", "d3d11.dll"), ("x86_64-unix", "winemetal.so")] {
+            try fm.createDirectory(at: root.appendingPathComponent(dir), withIntermediateDirectories: true)
+            try Data("dxmt".utf8).write(to: root.appendingPathComponent("\(dir)/\(file)"))
         }
-        let prefix = root.appendingPathComponent("prefix")
-        try BackendInstaller(paths: paths).prepare(.dxmt, prefix: prefix)
-        XCTAssertTrue(fm.fileExists(atPath: wineUnix.appendingPathComponent("winemetal.so").path))
-        XCTAssertTrue(fm.fileExists(atPath: prefix.appendingPathComponent("drive_c/windows/system32/winemetal.dll").path))
+    }
+
+    func testD3DMetalDetectedInsideWine() throws {
+        XCTAssertFalse(WineEnvironment(paths: paths).installedBackends().contains(.d3dmetal))
+        _ = try makeWine(.default)
+        XCTAssertTrue(WineEnvironment(paths: paths).installedBackends().contains(.d3dmetal))
+    }
+
+    func testActivateDXMTOverlaysAndD3DMetalRestores() throws {
+        let fm = FileManager.default
+        let wine = try makeWine(fm)
+        try makeDXMT(fm)
+        let switcher = BackendSwitcher(paths: paths)
+
+        try switcher.activate(.dxmt)
+        XCTAssertEqual(try String(contentsOf: wine.appendingPathComponent("x86_64-windows/d3d11.dll")), "dxmt")
+        XCTAssertTrue(fm.fileExists(atPath: wine.appendingPathComponent("x86_64-unix/winemetal.so").path))
+        XCTAssertTrue(fm.fileExists(atPath: wine.appendingPathComponent("i386-windows/d3d11.dll").path))
+        XCTAssertEqual(try String(contentsOf: wine.appendingPathComponent("x86_64-windows/d3d12.dll")), "d3dmetal")
+        XCTAssertEqual(switcher.active, .dxmt)
+
+        try switcher.activate(.dxmt) // no-op
+        try switcher.activate(.d3dmetal)
+        XCTAssertEqual(try String(contentsOf: wine.appendingPathComponent("x86_64-windows/d3d11.dll")), "d3dmetal")
+        XCTAssertFalse(fm.fileExists(atPath: wine.appendingPathComponent("x86_64-unix/winemetal.so").path))
+        XCTAssertFalse(fm.fileExists(atPath: wine.appendingPathComponent("i386-windows/d3d11.dll").path))
+        XCTAssertEqual(switcher.active, .d3dmetal)
+
+        try switcher.activate(.dxmt) // re-activating after a restore works again
+        XCTAssertEqual(try String(contentsOf: wine.appendingPathComponent("x86_64-windows/d3d11.dll")), "dxmt")
     }
 }

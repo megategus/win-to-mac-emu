@@ -1,9 +1,9 @@
 name: probe-engines
 
+# Run manually (Actions → probe-engines → Run workflow) when engine downloads break,
+# to see current upstream asset names and archive layouts.
 on:
   workflow_dispatch:
-  push:
-    paths: [".github/workflows/probe-engines.yml"]
 
 jobs:
   probe:

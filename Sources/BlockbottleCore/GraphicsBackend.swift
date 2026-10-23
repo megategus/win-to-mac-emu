@@ -24,7 +24,7 @@ public enum GraphicsBackend: String, Codable, CaseIterable, Identifiable, Sendab
         case .d3dmetal: return "D3DMetal (Apple GPTK)"
         case .dxmt: return "DXMT"
         case .dxvk: return "DXVK + MoltenVK"
-        case .wined3d: return "WineD3D (OpenGL)"
+        case .wined3d: return "Wine default"
         }
     }
 
@@ -33,11 +33,11 @@ public enum GraphicsBackend: String, Codable, CaseIterable, Identifiable, Sendab
         case .d3dmetal: return "Best for DirectX 11/12 games."
         case .dxmt: return "Native Metal DirectX 10/11. Fast and lightweight."
         case .dxvk: return "Good for DirectX 9–11 through Vulkan."
-        case .wined3d: return "Slowest, but always available."
+        case .wined3d: return "Whatever the Wine build ships with. Always available."
         }
     }
 
-    /// DLLs this backend replaces with native (`n,b`) versions.
+    /// DLLs this backend provides as Wine builtins (forced with `=b`).
     public var dllOverrides: [String] {
         switch self {
         case .dxmt: return ["d3d11", "d3d10core", "dxgi", "winemetal"]
@@ -49,7 +49,7 @@ public enum GraphicsBackend: String, Codable, CaseIterable, Identifiable, Sendab
     /// Folder under `Engines/` whose presence means the backend is installed.
     public var engineDirectory: String? {
         switch self {
-        case .d3dmetal: return "D3DMetal"
+        case .d3dmetal: return nil // ships inside the Wine engine
         case .dxmt: return "DXMT"
         case .dxvk: return "DXVK"
         case .wined3d: return nil

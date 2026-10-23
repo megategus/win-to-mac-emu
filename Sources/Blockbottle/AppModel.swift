@@ -136,7 +136,7 @@ final class AppModel {
 
     var needsSetup: Bool {
         guard let engines = engineManager, let steam = steamInstaller else { return true }
-        let wine = EngineManifest.default[0]
+        let wine = EngineManifest.wine
         guard engines.isInstalled(wine), let bottle = selectedBottle else { return true }
         return !steam.isInstalled(bottle: bottle)
     }

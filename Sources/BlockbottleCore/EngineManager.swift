@@ -49,14 +49,25 @@ public struct EngineManager: Sendable {
     }
 
     public func resolve(_ c: EngineComponent) async throws -> ResolvedAsset {
-        let data = try await http.data(from: c.latestReleaseAPI)
+        var lastError: Error?
+        for source in c.sources {
+            do {
+                if let asset = try await resolve(source) { return asset }
+            } catch {
+                lastError = error
+            }
+        }
+        if let lastError { throw lastError }
+        throw EngineError.noMatchingAsset(c.sources.map(\.repo).joined(separator: ", "))
+    }
+
+    func resolve(_ source: EngineSource) async throws -> ResolvedAsset? {
+        let data = try await http.data(from: source.latestReleaseAPI)
         let release = try JSONDecoder().decode(Release.self, from: data)
-        let regex = try NSRegularExpression(pattern: c.assetPattern)
+        let regex = try NSRegularExpression(pattern: source.assetPattern)
         guard let asset = release.assets.first(where: {
             regex.firstMatch(in: $0.name, range: NSRange($0.name.startIndex..., in: $0.name)) != nil
-        }) else {
-            throw EngineError.noMatchingAsset(c.repo)
-        }
+        }) else { return nil }
         let sha = asset.digest.flatMap { $0.hasPrefix("sha256:") ? String($0.dropFirst(7)).lowercased() : nil }
         return ResolvedAsset(url: asset.browser_download_url, name: asset.name, sha256: sha)
     }
@@ -68,7 +79,6 @@ public struct EngineManager: Sendable {
         try verify(file, expected: asset.sha256)
         try await extract(file, to: installURL(c))
         try asset.name.write(to: installURL(c).appendingPathComponent(".version"), atomically: true, encoding: .utf8)
-        if c.id == "d3dmetal" { try mergeD3DMetalIntoWine() }
     }
 
     /// Deletes the file on mismatch. A nil checksum means GitHub didn't publish one.
@@ -94,16 +104,6 @@ public struct EngineManager: Sendable {
         let source = items.count == 1 && items[0].hasDirectoryPath ? items[0] : staging
         if fm.fileExists(atPath: destination.path) { try fm.removeItem(at: destination) }
         try fm.moveItem(at: source, to: destination)
-    }
-
-    /// Whisky-style integration: GPTK's `lib` tree overlays Wine's `lib`.
-    func mergeD3DMetalIntoWine() throws {
-        let fm = FileManager.default
-        let gptkRoot = paths.engines.appendingPathComponent("D3DMetal", isDirectory: true)
-        let wineRoot = paths.engines.appendingPathComponent("Wine", isDirectory: true)
-        guard let gptkLib = EngineLayout.find("lib/external", under: gptkRoot)?.deletingLastPathComponent(),
-              let wineLib = EngineLayout.find("lib/wine", under: wineRoot)?.deletingLastPathComponent() else { return }
-        try EngineLayout.overlay(gptkLib, onto: wineLib, fileManager: fm)
     }
 
     public static func sha256(of url: URL) throws -> String {
@@ -137,23 +137,5 @@ enum EngineLayout {
             frontier = next
         }
         return nil
-    }
-
-    static func overlay(_ source: URL, onto dest: URL, fileManager fm: FileManager) throws {
-        guard let walker = fm.enumerator(at: source, includingPropertiesForKeys: [.isDirectoryKey]) else { return }
-        let base = source.standardizedFileURL.path
-        for case let item as URL in walker {
-            let rel = String(item.standardizedFileURL.path.dropFirst(base.count + 1))
-            let target = dest.appendingPathComponent(rel)
-            if (try? item.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true,
-               item.pathExtension != "framework" {
-                try fm.createDirectory(at: target, withIntermediateDirectories: true)
-                continue
-            }
-            if fm.fileExists(atPath: target.path) { try fm.removeItem(at: target) }
-            try fm.createDirectory(at: target.deletingLastPathComponent(), withIntermediateDirectories: true)
-            try fm.copyItem(at: item, to: target)
-            if item.pathExtension == "framework" { walker.skipDescendants() }
-        }
     }
 }

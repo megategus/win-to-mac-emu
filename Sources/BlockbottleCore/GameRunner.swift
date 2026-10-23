@@ -33,7 +33,7 @@ public struct GameRunner: Sendable {
 
     public func launch(game: SteamGame, bottle: Bottle, profile: GameProfile) async throws -> LaunchHandle {
         let resolved = env.resolve(profile.backend)
-        try BackendInstaller(paths: paths).prepare(resolved.backend, prefix: bottle.prefix)
+        try BackendSwitcher(paths: paths).activate(resolved.backend)
         let log = logURL(bottle: bottle, label: game.appID)
         _ = try? await runner.run(env.retinaInvocation(prefix: bottle.prefix, enabled: profile.retinaMode), logTo: log)
         var effective = profile

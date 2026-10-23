@@ -50,7 +50,11 @@ scripts/make-dmg.sh      # build/Blockbottle.dmg
 - Kernel anti-cheat games (EAC/BattlEye/Vanguard without Wine support) won't run.
 - Engine download names are matched by pattern against upstream GitHub releases
   (Gcenx, 3Shain); if upstream renames assets, setup reports "no download found".
-- D3DMetal comes from Apple's Game Porting Toolkit, downloaded at runtime from a
-  third-party build; it is never shipped in this repo or DMG.
+  Run the `probe-engines` workflow to see current names and archive layouts.
+- Wine comes from Gcenx's Game Porting Toolkit build (CrossOver-based Wine with
+  D3DMetal built in), falling back to plain wine-staging. DXMT/DXVK are swapped into
+  that Wine at launch, so only one backend is active at a time.
+- D3DMetal comes from Apple's Game Porting Toolkit, downloaded at runtime from
+  Gcenx's third-party build; it is never shipped in this repo or DMG.
 
 Not affiliated with Mojang, Microsoft, Valve or Apple. Font: Monocraft (SIL OFL 1.1).

@@ -38,7 +38,10 @@ public struct WineEnvironment: Sendable {
 
     public func installedBackends(fileManager: FileManager = .default) -> Set<GraphicsBackend> {
         var result: Set<GraphicsBackend> = [.wined3d]
-        for backend in GraphicsBackend.allCases {
+        if EngineLayout.find("lib/external/D3DMetal.framework", under: wineRoot) != nil {
+            result.insert(.d3dmetal)
+        }
+        for backend in [GraphicsBackend.dxmt, .dxvk] {
             if let dir = backend.engineDirectory,
                fileManager.fileExists(atPath: paths.engines.appendingPathComponent(dir).path) {
                 result.insert(backend)
@@ -68,7 +71,7 @@ public struct WineEnvironment: Sendable {
         }
         if profile.metalHUD { env["MTL_HUD_ENABLED"] = "1" }
         if !backend.dllOverrides.isEmpty {
-            env["WINEDLLOVERRIDES"] = backend.dllOverrides.joined(separator: ",") + "=n,b"
+            env["WINEDLLOVERRIDES"] = backend.dllOverrides.joined(separator: ",") + "=b"
         }
         switch backend {
         case .dxvk:
@@ -90,36 +93,76 @@ public struct WineEnvironment: Sendable {
     }
 }
 
-/// Copies DXMT / DXVK DLLs into a prefix so overrides find them.
-public struct BackendInstaller: Sendable {
+/// DXMT and DXVK ship as Wine *builtin* DLLs, which Wine only loads from its
+/// own `lib/wine/<arch>` folders. Activating a backend overlays its files there;
+/// activating D3DMetal/WineD3D restores the originals. One backend is active at
+/// a time for the shared Wine install.
+public struct BackendSwitcher: Sendable {
     public let paths: AppPaths
 
     public init(paths: AppPaths) { self.paths = paths }
 
-    static let x64Dirs: Set<String> = ["x64", "x86_64-windows"]
-    static let x32Dirs: Set<String> = ["x32", "i386-windows"]
+    static let archAliases: [String: String] = [
+        "x86_64-windows": "x86_64-windows", "x64": "x86_64-windows",
+        "i386-windows": "i386-windows", "x32": "i386-windows",
+        "x86_64-unix": "x86_64-unix",
+    ]
 
-    public func prepare(_ backend: GraphicsBackend, prefix: URL, fileManager: FileManager = .default) throws {
-        guard backend == .dxmt || backend == .dxvk, let dir = backend.engineDirectory else { return }
-        let source = paths.engines.appendingPathComponent(dir, isDirectory: true)
-        let system32 = prefix.appendingPathComponent("drive_c/windows/system32", isDirectory: true)
-        let syswow64 = prefix.appendingPathComponent("drive_c/windows/syswow64", isDirectory: true)
-        guard let walker = fileManager.enumerator(at: source, includingPropertiesForKeys: nil) else { return }
-        let wineUnix = EngineLayout.find("lib/wine", under: paths.engines.appendingPathComponent("Wine", isDirectory: true))?
-            .appendingPathComponent("x86_64-unix", isDirectory: true)
-        for case let file as URL in walker {
-            let ext = file.pathExtension.lowercased()
-            let parent = file.deletingLastPathComponent().lastPathComponent.lowercased()
-            let target: URL
-            if ext == "dll", Self.x64Dirs.contains(parent) { target = system32 }
-            else if ext == "dll", Self.x32Dirs.contains(parent) { target = syswow64 }
-            // DXMT's unix half (winemetal.so) must sit next to Wine's own .so files.
-            else if ext == "so", parent == "x86_64-unix", let wineUnix { target = wineUnix }
-            else { continue }
-            try fileManager.createDirectory(at: target, withIntermediateDirectories: true)
-            let dest = target.appendingPathComponent(file.lastPathComponent)
-            if fileManager.fileExists(atPath: dest.path) { try fileManager.removeItem(at: dest) }
-            try fileManager.copyItem(at: file, to: dest)
+    var wineLib: URL? {
+        EngineLayout.find("lib/wine", under: paths.engines.appendingPathComponent("Wine", isDirectory: true))
+    }
+
+    var stateDir: URL { paths.engines.appendingPathComponent("Wine-originals", isDirectory: true) }
+    private var activeFile: URL { stateDir.appendingPathComponent(".active") }
+    private var overlayFile: URL { stateDir.appendingPathComponent(".overlay") }
+
+    public var active: GraphicsBackend? {
+        (try? String(contentsOf: activeFile, encoding: .utf8)).flatMap(GraphicsBackend.init(rawValue:))
+    }
+
+    public func activate(_ backend: GraphicsBackend, fileManager fm: FileManager = .default) throws {
+        guard let lib = wineLib else { return }
+        let normalized: GraphicsBackend = (backend == .dxmt || backend == .dxvk) ? backend : .d3dmetal
+        if active == normalized { return }
+        try fm.createDirectory(at: stateDir, withIntermediateDirectories: true)
+        try restore(lib: lib, fileManager: fm)
+
+        if let dir = normalized.engineDirectory, normalized != .d3dmetal {
+            let source = paths.engines.appendingPathComponent(dir, isDirectory: true)
+            var overlaid: [String] = []
+            if let walker = fm.enumerator(at: source, includingPropertiesForKeys: [.isDirectoryKey]) {
+                for case let file as URL in walker {
+                    guard (try? file.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) != true,
+                          let arch = Self.archAliases[file.deletingLastPathComponent().lastPathComponent.lowercased()]
+                    else { continue }
+                    let rel = "\(arch)/\(file.lastPathComponent)"
+                    let dest = lib.appendingPathComponent(rel)
+                    let backup = stateDir.appendingPathComponent(rel)
+                    if fm.fileExists(atPath: dest.path), !fm.fileExists(atPath: backup.path) {
+                        try fm.createDirectory(at: backup.deletingLastPathComponent(), withIntermediateDirectories: true)
+                        try fm.copyItem(at: dest, to: backup)
+                    }
+                    try fm.createDirectory(at: dest.deletingLastPathComponent(), withIntermediateDirectories: true)
+                    if fm.fileExists(atPath: dest.path) { try fm.removeItem(at: dest) }
+                    try fm.copyItem(at: file, to: dest)
+                    overlaid.append(rel)
+                }
+            }
+            try overlaid.joined(separator: "\n").write(to: overlayFile, atomically: true, encoding: .utf8)
         }
+        try normalized.rawValue.write(to: activeFile, atomically: true, encoding: .utf8)
+    }
+
+    /// Removes overlaid files and puts Wine's originals back.
+    private func restore(lib: URL, fileManager fm: FileManager) throws {
+        let overlaid = ((try? String(contentsOf: overlayFile, encoding: .utf8)) ?? "")
+            .split(separator: "\n").map(String.init)
+        for rel in overlaid {
+            let dest = lib.appendingPathComponent(rel)
+            if fm.fileExists(atPath: dest.path) { try fm.removeItem(at: dest) }
+            let backup = stateDir.appendingPathComponent(rel)
+            if fm.fileExists(atPath: backup.path) { try fm.copyItem(at: backup, to: dest) }
+        }
+        try? fm.removeItem(at: overlayFile)
     }
 }
